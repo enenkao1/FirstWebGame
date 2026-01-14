@@ -34,6 +34,7 @@
           <span class="status-value">{{ player.armor || '空' }}</span>
         </div>
       </div>
+      <div class="vertical-line"></div>
       <div class="game-area">
         <p class="game-text">游戏开始中</p>
       </div>
@@ -80,6 +81,7 @@ const startGame = () => {
   width: 100%;
   height: 100%;
   align-items: stretch;
+  position: relative;
 }
 
 .status-bar {
@@ -88,7 +90,17 @@ const startGame = () => {
   padding: 20px;
   min-width: 200px;
   text-align: left;
-  border-right: 1px solid #000;
+  position: absolute;
+  top: 20%;
+  left: 0;
+}
+
+.vertical-line {
+  position: absolute;
+  left: 240px;
+  height: 100vh;
+  width: 1px;
+  background: #000;
 }
 
 .status-item {

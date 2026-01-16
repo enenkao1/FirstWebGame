@@ -77,7 +77,7 @@ const gamePlayingRef = ref(null)
 const itemMessage = ref('')
 
 const player = reactive({
-  floor: 1,
+  floor: 0,
   hp: 100,
   maxHp: 100,
   status: '正常',
@@ -87,52 +87,95 @@ const player = reactive({
   y: 1
 })
 
-const loadMap = async () => {
-  try {
-    const response = await fetch('/maps/map1.txt')
-    const text = await response.text()
-    const lines = text.trim().split('\n')
-    
-    const mapData = []
-    for (const line of lines) {
-      const row = line.trim().split('').map(Number)
-      mapData.push(row)
-    }
-    
-    // 找到玩家位置（值为2）
-    let playerPos = { row: 1, col: 1 }
-    for (let row = 0; row < mapData.length; row++) {
-      for (let col = 0; col < mapData[row].length; col++) {
-        if (mapData[row][col] === 2) {
-          playerPos = { row, col }
-          break
-        }
+const generateMap = () => {
+  const size = 11;
+  const numSpecialPoints = 3; 
+  const minDeadEnds = numSpecialPoints + 1;
+  
+  let mapData;
+  let deadEnds;
+  let candidates;
+  let attempts = 0;
+
+  while (attempts < 100) {
+    attempts++;
+    mapData = Array.from({ length: size }, () => Array(size).fill(1));
+
+    // 1. 迷宫生成 (递归回溯)
+  const startNodes = [{ r: 1, c: 1 }, { r: 1, c: 9 }, { r: 9, c: 1 }, { r: 9, c: 9 }];
+  const startNode = startNodes[Math.floor(Math.random() * startNodes.length)];
+  const visited = new Set();
+  const stack = [startNode];
+  visited.add(`${startNode.r},${startNode.c}`);
+  mapData[startNode.r][startNode.c] = 0;
+
+  while (stack.length > 0) {
+    const curr = stack[stack.length - 1];
+    const neighbors = [];
+    const dirs = [[0, 2], [0, -2], [2, 0], [-2, 0]];
+
+    for (const [dr, dc] of dirs) {
+      const nr = curr.r + dr;
+      const nc = curr.c + dc;
+      if (nr >= 1 && nr <= 9 && nc >= 1 && nc <= 9 && !visited.has(`${nr},${nc}`)) {
+        neighbors.push({ r: nr, c: nc, dr: dr / 2, dc: dc / 2 });
       }
-      if (mapData[row][playerPos.col] === 2) break
     }
-    
-    return { mapData, playerPos }
-  } catch (error) {
-    console.error('加载地图失败：', error)
-    // 失用数据
-    return {
-      mapData: [
-        [1, 1, 1, 1, 1, 1, 1, 1, 1],
-        [1, 0, 0, 0, 0, 1, 3, 0, 0, 0, 1],
-        [1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1],
-        [1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1],
-        [1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1],
-        [1, 4, 0, 0, 0, 0, 0, 0, 0, 4, 1],
-        [1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1],
-        [1, 0, 0, 0, 1, 0, 1, 0, 0, 1],
-        [1, 0, 0, 0, 1, 0, 1, 0, 0, 1],
-        [1, 0, 0, 0, 1, 0, 1, 0, 0, 1],
-        [1, 0, 0, 0, 1, 2, 1, 0, 0, 0, 1],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-      ],
-      playerPos: { row: 1, col: 1 }
+
+    if (neighbors.length > 0) {
+      const next = neighbors[Math.floor(Math.random() * neighbors.length)];
+      mapData[next.r][next.c] = 0;
+      mapData[curr.r + next.dr][curr.c + next.dc] = 0;
+      visited.add(`${next.r},${next.c}`);
+      stack.push({ r: next.r, c: next.c });
+    } else {
+      stack.pop();
     }
   }
+
+  // 2. 寻找所有候选点位（通路格）并评分
+  candidates = [];
+  deadEnds = [];
+  for (let r = 1; r <= 9; r += 2) {
+    for (let c = 1; c <= 9; c += 2) {
+      if (mapData[r][c] === 0) {
+        let walls = 0;
+        // 检查上下左右四个邻居
+        if (mapData[r-1][c] === 1) walls++;
+        if (mapData[r+1][c] === 1) walls++;
+        if (mapData[r][c-1] === 1) walls++;
+        if (mapData[r][c+1] === 1) walls++;
+        
+        const cand = { 
+          r, c, walls, 
+          score: walls * 10 + ((r === 1 || r === 9) && (c === 1 || c === 9) ? 5 : 0) 
+        };
+        candidates.push(cand);
+        if (walls >= 3) deadEnds.push(cand);
+      }
+    }
+  }
+
+  if (deadEnds.length >= minDeadEnds) break;
+}
+
+  // 3. 选取点位
+  // 随机打乱死胡同列表，实现随机分配
+  for (let i = deadEnds.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deadEnds[i], deadEnds[j]] = [deadEnds[j], deadEnds[i]];
+  }
+
+  // 玩家、楼梯和宝箱直接分配到前三个随机死胡同里
+  const pPos = deadEnds[0];
+  const sPos = deadEnds[1];
+  const cPos = deadEnds[2];
+
+  mapData[pPos.r][pPos.c] = 2;
+  mapData[sPos.r][sPos.c] = 3;
+  mapData[cPos.r][cPos.c] = 4;
+
+  return { mapData, playerPos: { row: pPos.r, col: pPos.c } };
 }
 
 const startGame = async () => {
@@ -140,7 +183,7 @@ const startGame = async () => {
   gameWon.value = false
   itemMessage.value = ''
   
-  const { mapData, playerPos } = await loadMap()
+  const { mapData, playerPos } = generateMap()
   map.value = mapData
   player.x = playerPos.col
   player.y = playerPos.row
@@ -158,8 +201,9 @@ const resetGame = async () => {
   itemMessage.value = ''
   player.weapon = ''
   player.armor = ''
+  player.floor = 0
   
-  const { mapData, playerPos } = await loadMap()
+  const { mapData, playerPos } = generateMap()
   map.value = mapData
   player.x = playerPos.col
   player.y = playerPos.row
@@ -172,166 +216,76 @@ const resetGame = async () => {
   })
 }
 
-const initMap = () => {
-  // 读取地图文件
-  const mapData = [
-    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-    [1, 0, 0, 0, 0, 1, 3, 0, 0, 0, 1],
-    [1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1],
-    [1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1],
-    [1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1],
-    [1, 4, 0, 0, 0, 0, 0, 0, 0, 4, 1],
-    [1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1],
-    [1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1],
-    [1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1],
-    [1, 0, 0, 0, 1, 2, 1, 0, 0, 0, 1],
-    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-  ]
-
-  // 找到玩家位置
-  let playerPos = { row: 1, col: 1 }
-  for (let row = 0; row < 10; row++) {
-    for (let col = 0; col < 10; col++) {
-      if (mapData[row][col] === 2) {
-        playerPos = { row, col }
-        break
-      }
-    }
-  }
-
-  // 直接使用地图文件的数据
-  map.value = mapData
-  player.x = playerPos.col
-  player.y = playerPos.row
-}
-
-const findAllNecessaryPaths = (map, positions) => {
-  // 找到所有特殊点位之间的最短路径
-  const allPaths = []
-  
-  for (let i = 0; i < positions.length; i++) {
-    for (let j = i + 1; j < positions.length; j++) {
-      const path = findShortestPath(map, positions[i], positions[j])
-      if (path) {
-        allPaths.push(path)
-      }
-    }
-  }
-  
-  return allPaths
-}
-
-const findShortestPath = (map, start, end) => {
-  // 使用BFS找到最短路径
-  const queue = [[start]]
-  const visited = new Set([`${start.row},${start.col}`])
-  
-  while (queue.length > 0) {
-    const path = queue.shift()
-    const current = path[path.length - 1]
-    
-    if (current.row === end.row && current.col === end.col) {
-      return path
-    }
-    
-    const directions = [[0, 1], [0, -1], [1, 0], [-1, 0]]
-    for (const [dx, dy] of directions) {
-      const newRow = current.row + dy
-      const newCol = current.col + dx
-      
-      if (newRow >= 1 && newRow <= 8 && newCol >= 1 && newCol <= 8) {
-        if (map[newRow][newCol] !== 1 && !visited.has(`${newRow},${newCol}`)) {
-          visited.add(`${newRow},${newCol}`)
-          queue.push([...path, { row: newRow, col: newCol }])
-        }
-      }
-    }
-  }
-  
-  return null
-}
-
-const checkConnectivity = (map, positions) => {
-  const start = positions[0]
-  const targets = positions.slice(1)
-  
-  const visited = new Set()
-  const queue = [start]
-  visited.add(`${start.row},${start.col}`)
-  
-  while (queue.length > 0) {
-    const current = queue.shift()
-    
-    const directions = [[0, 1], [0, -1], [1, 0], [-1, 0]]
-    for (const [dx, dy] of directions) {
-      const newRow = current.row + dy
-      const newCol = current.col + dx
-      
-      if (newRow >= 1 && newRow <= 8 && newCol >= 1 && newCol <= 8 && 
-          map[newRow][newCol] !== 1 && !visited.has(`${newRow},${newCol}`)) {
-        visited.add(`${newRow},${newCol}`)
-        queue.push({ row: newRow, col: newCol })
-      }
-    }
-  }
-  
-  return targets.every(pos => visited.has(`${pos.row},${pos.col}`))
-}
-
 const movePlayer = (dx, dy) => {
   if (gameWon.value) return
 
   const newX = player.x + dx
   const newY = player.y + dy
 
-  // 检查是否越界或碰到墙壁
-  if (newX < 0 || newX >= 10 || newY < 0 || newY >= 10) return
+  // 检查是否越界或碰到墙壁 (11x11 边界)
+  if (newX < 0 || newX >= 11 || newY < 0 || newY >= 11) return
   if (map.value[newY][newX] === 1) return
 
   // 记录当前位置是否是宝箱
   const currentCell = map.value[player.y][player.x]
-  const wasOnChest4 = currentCell === 4
-  const wasOnChest5 = currentCell === 5
+  const wasOnChest = currentCell === 4
 
   // 清除当前位置的玩家
-  map.value[player.y][player.x] = wasOnChest4 ? 4 : (wasOnChest5 ? 5 : 0)
-
-  // 更新玩家位置
-  player.x = newX
-  player.y = newY
-
-  // 检查是否到达目的地
-  if (map.value[newY][newX] === 3) {
-    gameWon.value = true
-  }
+  map.value[player.y][player.x] = wasOnChest ? 4 : 0
 
   // 检查是否进入宝箱位置
   if (map.value[newY][newX] === 4) {
+    // 规则1：既没有武器也没有护甲时，随机获得
     if (!player.weapon && !player.armor) {
-      // 随机获得武器或护甲
+      if (Math.random() < 0.5) {
+        itemMessage.value = '获得武器：铁剑'
+        player.weapon = '铁剑'
+      } else {
+        itemMessage.value = '获得护甲：铠甲'
+        player.armor = '铠甲'
+      }
+    }
+    // 规则2：有铁剑，获得铠甲
+    else if (player.weapon && !player.armor) {
+      itemMessage.value = '获得护甲：铠甲'
+      player.armor = '铠甲'
+    }
+    // 规则3：有铠甲，获得铁剑
+    else if (!player.weapon && player.armor) {
+      itemMessage.value = '获得武器：铁剑'
+      player.weapon = '铁剑'
+    }
+    // 规则4：都有装备，随机获得一个
+    else if (player.weapon && player.armor) {
       if (Math.random() < 0.5) {
         itemMessage.value = '获得武器：铁剑'
       } else {
         itemMessage.value = '获得护甲：铠甲'
       }
     }
-  }
-
-  // 检查是否离开宝箱位置，获得物品
-  if (wasOnChest && map.value[newY][newX] !== 4) {
-    if (!player.weapon && !player.armor) {
-      // 随机获得武器或护甲
-      if (Math.random() < 0.5) {
-        player.weapon = '铁剑'
-      } else {
-        player.armor = '铠甲'
-      }
-      itemMessage.value = ''
-    }
-  } else if (map.value[newY][newX] !== 4) {
-    // 离开宝箱位置但没有获得物品（已经获得过了）
+  } else {
+    // 离开宝箱位置，清除提示
     itemMessage.value = ''
   }
+
+  // 检查是否到达目的地 (楼梯)
+  if (map.value[newY][newX] === 3) {
+    if (player.floor <= -10) {
+      gameWon.value = true
+    } else {
+      player.floor -= 1
+      const { mapData, playerPos: pPos } = generateMap()
+      map.value = mapData
+      player.x = pPos.col
+      player.y = pPos.row
+      itemMessage.value = `进入地下第 ${Math.abs(player.floor)} 层`
+      return // 切换地图后直接返回
+    }
+  }
+
+  // 更新玩家位置
+  player.x = newX
+  player.y = newY
 
   // 在新位置显示玩家
   map.value[newY][newX] = 2
@@ -534,3 +488,4 @@ const getCellIcon = (cell) => {
   animation: fadeIn 0.5s ease-in-out;
 }
 </style>
+
